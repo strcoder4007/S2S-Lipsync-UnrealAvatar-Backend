@@ -172,6 +172,34 @@ async def generate_response(prompt):
         # Fallbacks omitted for brevity (reuse from previous code if needed)
         return None, None
 
+    # Helper: Convert numpy audio array to WAV bytes
+    def audio_array_to_wav_bytes(audio_array, samplerate):
+        import soundfile as sf
+        import io
+        wav_io = io.BytesIO()
+        sf.write(wav_io, audio_array, samplerate, format='WAV')
+        wav_bytes = wav_io.getvalue()
+        return wav_bytes
+
+    # Helper: Send WAV bytes to grpc_client.py via WebSocket
+    async def send_wav_to_grpc_client(wav_bytes, samplerate, ws_url="ws://localhost:8765"):
+        import websockets
+        import json
+        try:
+            async with websockets.connect(ws_url, max_size=None) as ws:
+                # Send JSON header
+                header = json.dumps({"sample_rate": samplerate})
+                await ws.send(header)
+                # Send WAV bytes (in chunks if large)
+                chunk_size = 4096
+                for i in range(0, len(wav_bytes), chunk_size):
+                    await ws.send(wav_bytes[i:i+chunk_size])
+                # Send END signal
+                await ws.send("END")
+                print(f"[A2F] Sent audio to grpc_client.py at {ws_url}")
+        except Exception as e:
+            print(f"[A2F] Error sending audio to grpc_client.py: {e}")
+
     print_buffer = ""
     async for event in response:  # Fixed: Changed from 'for' to 'async for'
         part = event.choices[0].delta.content or ""
@@ -210,6 +238,9 @@ async def generate_response(prompt):
                         audio_array, samplerate = mp3_bytes_to_audio_array(full_audio)
                         if audio_array is not None:
                             audio_queue.append((audio_array, samplerate))
+                            # Send to grpc_client.py (Audio2Face)
+                            wav_bytes = audio_array_to_wav_bytes(audio_array, samplerate)
+                            await send_wav_to_grpc_client(wav_bytes, samplerate)
                 except Exception as e:
                     print(f"[ERROR] TTS generation error for sentence: {e}")
             # Keep the last (possibly incomplete) sentence in buffer
@@ -235,6 +266,9 @@ async def generate_response(prompt):
                 audio_array, samplerate = mp3_bytes_to_audio_array(full_audio)
                 if audio_array is not None:
                     audio_queue.append((audio_array, samplerate))
+                    # Send to grpc_client.py (Audio2Face)
+                    wav_bytes = audio_array_to_wav_bytes(audio_array, samplerate)
+                    await send_wav_to_grpc_client(wav_bytes, samplerate)
         except Exception as e:
             print(f"[ERROR] TTS generation error for last sentence: {e}")
 
