@@ -280,7 +280,7 @@ async def generate_response(prompt):
     print("\nSpeaking…")
     # Play all audios in sequence
     if audio_queue:
-        play_audio_sequence(audio_queue)
+        # play_audio_sequence(audio_queue)
         print(f"[DEBUG] Audio playback completed")
     else:
         print("[WARNING] No audio chunks received")
