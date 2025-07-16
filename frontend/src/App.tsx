@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import './App.css';
 
 type Message = {
@@ -9,75 +9,128 @@ type Message = {
   audioUrl?: string;
 };
 
-const API_URL = 'http://localhost:8000/chat';
+const WS_URL = 'ws://localhost:8000/ws';
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
+  const [wsStatusText, setWsStatusText] = useState<string>('Connecting...');
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // Scroll to bottom on new message
-  React.useEffect(() => {
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Send text to backend
-  const sendTextToBackend = async (text: string) => {
-    const formData = new FormData();
-    formData.append('prompt', text);
-    try {
-      const res = await fetch(`${API_URL}/text`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      return data.response || 'No response';
-    } catch (e) {
-      return 'Error contacting backend';
+  // Establish WebSocket connection
+  useEffect(() => {
+    const socket = new WebSocket(WS_URL);
+    setWs(socket);
+
+    socket.onopen = () => {
+      setWsStatus('connected');
+      setWsStatusText('Connected');
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'llm_response') {
+          setMessages((msgs) => [
+            ...msgs,
+            {
+              id: Date.now() + Math.random(),
+              sender: 'bot',
+              type: 'text',
+              content: data.response,
+            },
+          ]);
+        } else if (data.type === 'transcript') {
+          setMessages((msgs) => [
+            ...msgs,
+            {
+              id: Date.now() + Math.random(),
+              sender: 'bot',
+              type: 'text',
+              content: `Transcript: ${data.transcript}`,
+            },
+          ]);
+        } else if (data.type === 'error') {
+          setMessages((msgs) => [
+            ...msgs,
+            {
+              id: Date.now() + Math.random(),
+              sender: 'bot',
+              type: 'text',
+              content: `Error: ${data.error}`,
+            },
+          ]);
+        }
+      } catch (err) {
+        console.error('[Frontend] Error parsing WebSocket message:', err);
+      }
+    };
+
+    socket.onerror = (err) => {
+      console.error('[Frontend] WebSocket error:', err);
+      setWsStatus('error');
+      setWsStatusText('WebSocket error');
+    };
+
+    socket.onclose = () => {
+      setWsStatus('closed');
+      setWsStatusText('WebSocket connection closed');
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, []);
+
+  // Send text to backend via WebSocket
+  const sendTextToBackend = (text: string) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'text', prompt: text }));
     }
   };
 
-  // Send audio to backend
-  const sendAudioToBackend = async (audioBlob: Blob) => {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.webm');
-    try {
-      const res = await fetch(`${API_URL}/audio`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      return data;
-    } catch (e) {
-      return { error: 'Error contacting backend' };
+  // Send audio to backend via WebSocket
+  const sendAudioToBackend = (audioBlob: Blob) => {
+    console.log('[Frontend] Sending audio to backend, size:', audioBlob.size, 'type:', audioBlob.type);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Send mimeType first
+      ws.send(JSON.stringify({ type: 'audio-mime', mimeType: audioBlob.type }));
+      
+      // Then send the audio data
+      const reader = new FileReader();
+      reader.onload = function () {
+        if (reader.result && reader.result instanceof ArrayBuffer) {
+          console.log('[Frontend] Sending audio buffer, size:', reader.result.byteLength);
+          ws.send(reader.result);
+        }
+      };
+      reader.readAsArrayBuffer(audioBlob);
+    } else {
+      console.error('[Frontend] WebSocket not open, cannot send audio');
     }
   };
 
   // Handle text input send
-  const handleSend = async () => {
+  const handleSend = () => {
     if (input.trim() === '') return;
     const newMsg: Message = {
-      id: Date.now(),
+      id: Date.now() + Math.random(),
       sender: 'user',
       type: 'text',
       content: input,
     };
     setMessages((msgs) => [...msgs, newMsg]);
+    sendTextToBackend(input);
     setInput('');
-    // Send to backend
-    const botReply = await sendTextToBackend(input);
-    setMessages((msgs) => [
-      ...msgs,
-      {
-        id: Date.now() + 1,
-        sender: 'bot',
-        type: 'text',
-        content: botReply,
-      },
-    ]);
   };
 
   // Handle Enter key
@@ -87,94 +140,186 @@ function App() {
     }
   };
 
+  // Enhanced WAV encoder that handles actual audio data
+  const encodeWAV = (audioBuffer: AudioBuffer): Blob => {
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+
+    // Get audio data
+    const channelData = [];
+    for (let i = 0; i < numChannels; i++) {
+      channelData.push(audioBuffer.getChannelData(i));
+    }
+
+    // Interleave channels if stereo
+    let samples: Float32Array;
+    if (numChannels === 2) {
+      samples = new Float32Array(audioBuffer.length * 2);
+      for (let i = 0; i < audioBuffer.length; i++) {
+        samples[i * 2] = channelData[0][i];
+        samples[i * 2 + 1] = channelData[1][i];
+      }
+    } else {
+      samples = channelData[0];
+    }
+
+    // Create buffer
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    // Write WAV header
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * bitDepth / 8, true);
+    view.setUint16(32, numChannels * bitDepth / 8, true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    // Convert float samples to 16-bit PCM
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  };
+
   // Handle audio recording
   const handleMicClick = async () => {
     if (isRecording) {
       // Stop recording
-      mediaRecorder?.stop();
+      console.log('[Frontend] Stopping recording');
+      if (mediaRecorder) {
+        mediaRecorder.stop();
+      }
     } else {
       // Start recording
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         alert('Audio recording not supported in this browser.');
         return;
       }
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new window.MediaRecorder(stream);
+        console.log('[Frontend] Starting recording');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          }
+        });
+
+        // Use a more compatible MIME type
+        let mimeType = 'audio/webm;codecs=opus';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+          mimeType = 'audio/ogg;codecs=opus';
+        } else {
+          mimeType = ''; // Let browser decide
+        }
+
+        console.log('[Frontend] Using MediaRecorder mimeType:', mimeType);
+
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
         setMediaRecorder(recorder);
-        setAudioChunks([]);
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
-            setAudioChunks((chunks) => [...chunks, e.data]);
+
+        const audioChunks: Blob[] = [];
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+            console.log('[Frontend] Audio chunk received, size:', event.data.size);
           }
         };
+
         recorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          console.log('[Frontend] Recording stopped, processing audio...');
+          setIsRecording(false);
+          
+          // Stop all tracks to release microphone
+          stream.getTracks().forEach(track => track.stop());
+
+          if (audioChunks.length === 0) {
+            console.error('[Frontend] No audio chunks received');
+            return;
+          }
+
+          const audioBlob = new Blob(audioChunks, { type: recorder.mimeType });
+          console.log('[Frontend] Created audio blob, size:', audioBlob.size, 'type:', audioBlob.type);
+
+          if (audioBlob.size === 0) {
+            console.error('[Frontend] Audio blob is empty');
+            return;
+          }
+
+          // Create audio URL for playback
           const audioUrl = URL.createObjectURL(audioBlob);
+          
+          // Add message to chat
           const newMsg: Message = {
-            id: Date.now(),
+            id: Date.now() + Math.random(),
             sender: 'user',
             type: 'audio',
-            content: '',
+            content: 'Audio message',
             audioUrl,
           };
           setMessages((msgs) => [...msgs, newMsg]);
+
           // Send to backend
-          const data = await sendAudioToBackend(audioBlob);
-          if (data.error) {
-            setMessages((msgs) => [
-              ...msgs,
-              {
-                id: Date.now() + 1,
-                sender: 'bot',
-                type: 'text',
-                content: data.error,
-              },
-            ]);
-          } else {
-            // Show transcript and response
-            setMessages((msgs) => [
-              ...msgs,
-              {
-                id: Date.now() + 2,
-                sender: 'bot',
-                type: 'text',
-                content: `Transcript: ${data.transcript || ''}`,
-              },
-              {
-                id: Date.now() + 3,
-                sender: 'bot',
-                type: 'text',
-                content: data.response || '',
-              },
-            ]);
-          }
+          sendAudioToBackend(audioBlob);
         };
-        recorder.start();
+
+        recorder.onerror = (event) => {
+          console.error('[Frontend] MediaRecorder error:', event);
+          setIsRecording(false);
+        };
+
+        recorder.start(1000); // Collect data every second
         setIsRecording(true);
-        recorder.onstart = () => setIsRecording(true);
-        recorder.onpause = () => setIsRecording(false);
-        recorder.onresume = () => setIsRecording(true);
-        recorder.onerror = () => setIsRecording(false);
-        recorder.onstop = () => setIsRecording(false);
+        
       } catch (err) {
-        alert('Could not start audio recording.');
+        console.error('[Frontend] Error starting recording:', err);
+        alert('Could not start audio recording: ' + err);
       }
     }
   };
 
-  // Stop recording when mediaRecorder stops
-  React.useEffect(() => {
-    if (!mediaRecorder) return;
-    const handleStop = () => setIsRecording(false);
-    mediaRecorder.addEventListener('stop', handleStop);
-    return () => {
-      mediaRecorder.removeEventListener('stop', handleStop);
-    };
-  }, [mediaRecorder]);
-
   return (
     <div className="chat-app">
+      <div className="ws-status-bar">
+        <span
+          className="ws-status-indicator"
+          style={{
+            backgroundColor:
+              wsStatus === 'connected'
+                ? '#4caf50'
+                : wsStatus === 'connecting'
+                ? '#ffb300'
+                : '#e53935',
+          }}
+        />
+        <span className="ws-status-text">{wsStatusText}</span>
+      </div>
       <div className="chat-header">
         <h2>Chat Assistant</h2>
       </div>
@@ -188,7 +333,10 @@ function App() {
               <span>{msg.content}</span>
             ) : (
               msg.audioUrl && (
-                <audio controls src={msg.audioUrl} style={{ width: '200px' }} />
+                <div>
+                  <div style={{ marginBottom: '8px' }}>🎤 {msg.content}</div>
+                  <audio controls src={msg.audioUrl} style={{ width: '200px' }} />
+                </div>
               )
             )}
           </div>
@@ -209,7 +357,6 @@ function App() {
           onClick={handleMicClick}
           title={isRecording ? 'Stop Recording' : 'Start Recording'}
         >
-          {/* Microphone SVG */}
           <svg
             width="24"
             height="24"
