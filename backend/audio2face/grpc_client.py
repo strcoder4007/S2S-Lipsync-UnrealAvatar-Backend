@@ -8,9 +8,12 @@ import audio2face_pb2
 import audio2face_pb2_grpc
 import grpc
 import json # For parsing the header
+import os
+from dotenv import load_dotenv
 
-A2F_GRPC_URL = "localhost:50051"
-INSTANCE_NAME = "/World/audio2face/PlayerStreaming"
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+A2F_GRPC_URL = os.getenv("A2F_GRPC_URL", "localhost:50051")
+INSTANCE_NAME = os.getenv("INSTANCE_NAME", "/World/audio2face/PlayerStreaming")
 
 # Global queue for audio data (audio_data, samplerate, websocket_id_for_logging)
 audio_queue = asyncio.Queue()
