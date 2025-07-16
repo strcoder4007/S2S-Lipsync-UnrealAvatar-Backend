@@ -54,9 +54,9 @@ function App() {
             ...msgs,
             {
               id: Date.now() + Math.random(),
-              sender: 'bot',
+              sender: 'user',
               type: 'text',
-              content: `Transcript: ${data.transcript}`,
+              content: data.transcript,
             },
           ]);
         } else if (data.type === 'error') {
@@ -271,19 +271,6 @@ function App() {
             console.error('[Frontend] Audio blob is empty');
             return;
           }
-
-          // Create audio URL for playback
-          const audioUrl = URL.createObjectURL(audioBlob);
-          
-          // Add message to chat
-          const newMsg: Message = {
-            id: Date.now() + Math.random(),
-            sender: 'user',
-            type: 'audio',
-            content: 'Audio message',
-            audioUrl,
-          };
-          setMessages((msgs) => [...msgs, newMsg]);
 
           // Send to backend
           sendAudioToBackend(audioBlob);
