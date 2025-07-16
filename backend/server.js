@@ -44,68 +44,6 @@ app.get('/', (req, res) => {
 });
 
 /**
- * POST /chat/text
- * Body: form-data { prompt: string }
- * Returns: { response: string }
- */
-app.post('/chat/text', async (req, res) => {
-  try {
-    const prompt = req.body.prompt || (req.body && req.body.get && req.body.get('prompt'));
-    if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-
-    const promptWithLimit = `${prompt}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [{ role: "user", content: promptWithLimit }],
-      max_tokens: 300,
-    });
-    const llmResponse = completion.choices[0]?.message?.content || "";
-    res.json({ response: llmResponse });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
-
-/**
- * POST /chat/audio
- * Body: form-data { file: audio }
- * Returns: { transcript: string, response: string }
- */
-const multer = require('multer');
-const upload = multer();
-
-app.post('/chat/audio', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'Missing audio file' });
-
-    // Send audio to Deepgram for transcription
-    const deepgramRes = await axios.post(
-      'https://api.deepgram.com/v1/listen',
-      req.file.buffer,
-      {
-        headers: {
-          'Authorization': `Token ${DEEPGRAM_API_KEY}`,
-          'Content-Type': 'audio/wav',
-        },
-      }
-    );
-    const transcript = deepgramRes.data.results.channels[0].alternatives[0].transcript || '';
-
-    // Call OpenAI for response
-    const promptWithLimit = `${transcript}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [{ role: "user", content: promptWithLimit }],
-      max_tokens: 300,
-    });
-    const llmResponse = completion.choices[0]?.message?.content || "";
-    res.json({ transcript, response: llmResponse });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
-
-/**
  * Helper: Convert MP3 buffer to WAV (PCM, mono, 16kHz) using ffmpeg
  * Returns: Promise<Buffer> (WAV buffer)
  */
@@ -253,13 +191,16 @@ wss.on('connection', (ws) => {
       if (parsed && parsed.type === 'text' && parsed.prompt) {
         console.log('[Backend] Handling text message:', parsed.prompt);
         const promptWithLimit = `${parsed.prompt}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4",
-          messages: [{ role: "user", content: promptWithLimit }],
-          max_tokens: 300,
-        });
-        const llmResponse = completion.choices[0]?.message?.content || "";
-        ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
+        // const completion = await openai.chat.completions.create({
+        //   model: "gpt-4",
+        //   messages: [{ role: "user", content: promptWithLimit }],
+        //   max_tokens: 300,
+        // });
+        // const llmResponse = completion.choices[0]?.message?.content || "";
+        const llmResponse = "I can help you with a wide range of tasks across many domains. Whether you're coding in Python, JavaScript, or working with machine learning models, I can write, debug, and explain code, assist with AI pipelines, and support deployment. I can also answer complex questions, simplify technical topics, and help you learn new skills—from system design and data science to creative writing and productivity workflows.";
+        setTimeout(() => {
+          ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
+        }, 2000);
 
         // --- TTS and send to grpc_client.py ---
         try {
@@ -324,15 +265,18 @@ wss.on('connection', (ws) => {
 
             // Generate LLM response
             const promptWithLimit = `${transcript}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
-            const completion = await openai.chat.completions.create({
-              model: "gpt-4",
-              messages: [{ role: "user", content: promptWithLimit }],
-              max_tokens: 300,
-            });
-            const llmResponse = completion.choices[0]?.message?.content || "";
+            // const completion = await openai.chat.completions.create({
+            //   model: "gpt-4",
+            //   messages: [{ role: "user", content: promptWithLimit }],
+            //   max_tokens: 300,
+            // });
+            // const llmResponse = completion.choices[0]?.message?.content || "";
+            const llmResponse = "I can help you with a wide range of tasks across many domains. Whether you're coding in Python, JavaScript, or working with machine learning models, I can write, debug, and explain code, assist with AI pipelines, and support deployment. I can also answer complex questions, simplify technical topics, and help you learn new skills—from system design and data science to creative writing and productivity workflows.";
             
             // Send LLM response to frontend
-            ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
+            setTimeout(() => {
+              ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
+            }, 2000);
 
             // --- TTS and send to grpc_client.py ---
             try {

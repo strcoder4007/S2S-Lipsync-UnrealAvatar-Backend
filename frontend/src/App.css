@@ -4,11 +4,11 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 480px;
+  max-width: 630px;
   margin: 32px auto;
   background: rgba(245, 247, 250, 0.85);
   border: 1.5px solid #e0e0e0;
-  border-radius: 22px;
+  border-radius: 0;
   box-shadow: 0 8px 32px rgba(25, 118, 210, 0.10), 0 1.5px 8px rgba(0,0,0,0.07);
   font-family: 'Inter', 'Segoe UI', 'Roboto', Arial, sans-serif;
   backdrop-filter: blur(8px);
@@ -59,8 +59,6 @@
   padding: 28px 16px 18px 16px;
   background: linear-gradient(90deg, #1976d2 60%, #42a5f5 100%);
   color: #fff;
-  border-top-left-radius: 22px;
-  border-top-right-radius: 22px;
   text-align: center;
   font-size: 1.45rem;
   font-weight: 700;
@@ -96,7 +94,7 @@
   max-width: 80%;
   padding: 14px 20px;
   border-radius: 22px;
-  font-size: 1.08rem;
+  font-size: 0.89rem;
   line-height: 1.6;
   word-break: break-word;
   box-shadow: 0 2px 12px rgba(25, 118, 210, 0.07), 0 1px 4px rgba(0,0,0,0.04);
@@ -133,8 +131,6 @@
   align-items: center;
   padding: 18px 18px 18px 18px;
   background: rgba(255,255,255,0.92);
-  border-bottom-left-radius: 22px;
-  border-bottom-right-radius: 22px;
   gap: 10px;
   box-shadow: 0 -2px 8px rgba(25, 118, 210, 0.04);
   border-top: 1.5px solid #e3eafc;
@@ -145,7 +141,7 @@
   padding: 12px 18px;
   border: 1.5px solid #cfd8dc;
   border-radius: 22px;
-  font-size: 1.08rem;
+  font-size: 0.89rem;
   outline: none;
   transition: border 0.2s, background 0.2s;
   background: #f7fafd;
