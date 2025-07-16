@@ -1,6 +1,6 @@
 // backend/server.js
 
-const config = require('./config');
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -26,10 +26,9 @@ app.use(express.urlencoded({ extended: true }));
 
 const PORT = 8000;
 
-// Load API keys from config.js
-const DEEPGRAM_API_KEY = config.deepgramApiKey;
-const ELEVENLABS_API_KEY = config.elevenlabsApiKey;
-const OPENAI_API_KEY = config.openaiApiKey;
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // Initialize OpenAI client
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
