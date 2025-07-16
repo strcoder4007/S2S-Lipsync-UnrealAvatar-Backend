@@ -361,17 +361,26 @@ function App() {
             width="24"
             height="24"
             viewBox="0 0 24 24"
-            fill={isRecording ? '#e53935' : '#333'}
+            fill={isRecording ? '#e53935' : '#fff'}
             xmlns="http://www.w3.org/2000/svg"
           >
             <rect x="9" y="2" width="6" height="12" rx="3" />
-            <path d="M5 10v2a7 7 0 0 0 14 0v-2" stroke={isRecording ? '#e53935' : '#333'} strokeWidth="2" fill="none" />
-            <line x1="12" y1="22" x2="12" y2="18" stroke={isRecording ? '#e53935' : '#333'} strokeWidth="2" />
-            <line x1="8" y1="22" x2="16" y2="22" stroke={isRecording ? '#e53935' : '#333'} strokeWidth="2" />
+            <path d="M5 10v2a7 7 0 0 0 14 0v-2" stroke={isRecording ? '#e53935' : '#fff'} strokeWidth="2" fill="none" />
+            <line x1="12" y1="22" x2="12" y2="18" stroke={isRecording ? '#e53935' : '#fff'} strokeWidth="2" />
+            <line x1="8" y1="22" x2="16" y2="22" stroke={isRecording ? '#e53935' : '#fff'} strokeWidth="2" />
           </svg>
         </button>
         <button className="send-btn" onClick={handleSend} disabled={isRecording || input.trim() === ''}>
-          Send
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="#fff"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ display: 'block' }}
+          >
+            <path d="M3 20l18-8-18-8v7l13 1-13 1z" />
+          </svg>
         </button>
       </div>
     </div>
