@@ -8,6 +8,7 @@ const axios = require('axios');
 const { OpenAI } = require('openai');
 const { connectToDeepgram } = require('./deepgram');
 const { ttsWithElevenLabs } = require('./elevenlabs');
+const WebSocketClient = require('ws');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 const { Readable } = require('stream');
@@ -105,6 +106,69 @@ app.post('/chat/audio', upload.single('file'), async (req, res) => {
   }
 });
 
+/**
+ * Helper: Convert MP3 buffer to WAV (PCM, mono, 16kHz) using ffmpeg
+ * Returns: Promise<Buffer> (WAV buffer)
+ */
+const convertMp3ToWavPcm16kMono = (mp3Buffer) => {
+  return new Promise((resolve, reject) => {
+    const tempInput = path.join(__dirname, `temp_input_${Date.now()}.mp3`);
+    const tempOutput = path.join(__dirname, `temp_output_${Date.now()}.wav`);
+    fs.writeFileSync(tempInput, mp3Buffer);
+    ffmpeg(tempInput)
+      .inputFormat('mp3')
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .audioCodec('pcm_s16le')
+      .format('wav')
+      .output(tempOutput)
+      .on('end', () => {
+        try {
+          const wavBuffer = fs.readFileSync(tempOutput);
+          fs.unlinkSync(tempInput);
+          fs.unlinkSync(tempOutput);
+          resolve(wavBuffer);
+        } catch (err) {
+          reject(err);
+        }
+      })
+      .on('error', (err) => {
+        try {
+          fs.unlinkSync(tempInput);
+          fs.unlinkSync(tempOutput);
+        } catch {}
+        reject(err);
+      })
+      .run();
+  });
+};
+
+
+const sendWavToGrpcClient = async (wavBuffer, sampleRate = 16000, wsUrl = "ws://localhost:8765") => {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocketClient(wsUrl);
+    ws.binaryType = 'nodebuffer';
+    ws.on('open', () => {
+      // Send JSON header
+      ws.send(JSON.stringify({ sample_rate: sampleRate }));
+      // Send WAV buffer in chunks
+      const chunkSize = 4096;
+      for (let i = 0; i < wavBuffer.length; i += chunkSize) {
+        ws.send(wavBuffer.slice(i, i + chunkSize));
+      }
+      // Send END signal
+      ws.send("END");
+      // Print log immediately after sending audio
+      console.log(`[Backend] Sent ${wavBuffer.length} bytes of WAV audio to grpc_client.py via WebSocket (${wsUrl})`);
+      ws.close();
+      resolve();
+    });
+    ws.on('error', (err) => {
+      reject(err);
+    });
+  });
+};
+
 // Helper function to convert audio to linear PCM
 const convertToLinearPCM = (audioBuffer, mimeType) => {
   return new Promise((resolve, reject) => {
@@ -197,6 +261,25 @@ wss.on('connection', (ws) => {
         });
         const llmResponse = completion.choices[0]?.message?.content || "";
         ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
+
+        // --- TTS and send to grpc_client.py ---
+        try {
+          // Generate TTS audio (MP3) from LLM response
+          const ttsAudioMp3 = await ttsWithElevenLabs({
+            text: llmResponse,
+            apiKey: ELEVENLABS_API_KEY,
+            // voiceId and modelId use defaults
+          });
+          // Convert MP3 to WAV (PCM, mono, 16kHz)
+          const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
+          // Send WAV to grpc_client.py via WebSocket
+          await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
+          console.log('[Backend] Sent TTS audio to grpc_client.py via WebSocket');
+        } catch (err) {
+          console.error('[Backend] Error in TTS or sending audio to grpc_client:', err);
+        }
+        // --- End TTS and send ---
+
         return;
       }
 
@@ -251,6 +334,25 @@ wss.on('connection', (ws) => {
             
             // Send LLM response to frontend
             ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
+
+            // --- TTS and send to grpc_client.py ---
+            try {
+              // Generate TTS audio (MP3) from LLM response
+              const ttsAudioMp3 = await ttsWithElevenLabs({
+                text: llmResponse,
+                apiKey: ELEVENLABS_API_KEY,
+                // voiceId and modelId use defaults
+              });
+              // Convert MP3 to WAV (PCM, mono, 16kHz)
+              const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
+              // Send WAV to grpc_client.py via WebSocket
+              await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
+              console.log('[Backend] Sent TTS audio to grpc_client.py via WebSocket (from audio buffer handler)');
+            } catch (err) {
+              console.error('[Backend] Error in TTS or sending audio to grpc_client (from audio buffer handler):', err);
+            }
+            // --- End TTS and send ---
+
           } else {
             ws.send(JSON.stringify({ type: 'error', error: 'No speech detected in audio' }));
           }
