@@ -7,6 +7,7 @@ type Message = {
   type: 'text' | 'audio';
   content: string;
   audioUrl?: string;
+  isStreaming?: boolean;
 };
 
 const WS_URL = 'ws://localhost:8000/ws';
@@ -36,45 +37,6 @@ function App() {
       setWsStatusText('Connected');
     };
 
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'llm_response') {
-          setMessages((msgs) => [
-            ...msgs,
-            {
-              id: Date.now() + Math.random(),
-              sender: 'bot',
-              type: 'text',
-              content: data.response,
-            },
-          ]);
-        } else if (data.type === 'transcript') {
-          setMessages((msgs) => [
-            ...msgs,
-            {
-              id: Date.now() + Math.random(),
-              sender: 'user',
-              type: 'text',
-              content: data.transcript,
-            },
-          ]);
-        } else if (data.type === 'error') {
-          setMessages((msgs) => [
-            ...msgs,
-            {
-              id: Date.now() + Math.random(),
-              sender: 'bot',
-              type: 'text',
-              content: `Error: ${data.error}`,
-            },
-          ]);
-        }
-      } catch (err) {
-        console.error('[Frontend] Error parsing WebSocket message:', err);
-      }
-    };
-
     socket.onerror = (err) => {
       console.error('[Frontend] WebSocket error:', err);
       setWsStatus('error');
@@ -90,6 +52,74 @@ function App() {
       socket.close();
     };
   }, []);
+
+  // Handle incoming WebSocket messages
+  useEffect(() => {
+    if (!ws) return;
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        setMessages(prevMsgs => {
+          const newMsgs = [...prevMsgs];
+          const lastMsg = newMsgs[newMsgs.length - 1];
+
+          if (data.type === 'llm_chunk') {
+            if (lastMsg && lastMsg.sender === 'bot' && lastMsg.isStreaming) {
+              lastMsg.content += data.chunk;
+            }
+            return newMsgs;
+          }
+          
+          if (data.type === 'llm_response_complete') {
+            if (lastMsg && lastMsg.sender === 'bot' && lastMsg.isStreaming) {
+              lastMsg.content = data.response;
+              lastMsg.isStreaming = false;
+            }
+            return newMsgs;
+          }
+          
+          if (data.type === 'transcript') {
+            newMsgs.push({
+              id: Date.now(),
+              sender: 'user',
+              type: 'text',
+              content: data.transcript,
+            });
+            // Add a placeholder for the bot's response
+            newMsgs.push({
+              id: Date.now() + 1,
+              sender: 'bot',
+              type: 'text',
+              content: '',
+              isStreaming: true,
+            });
+            return newMsgs;
+          }
+
+          if (data.type === 'error') {
+            if (lastMsg && lastMsg.sender === 'bot' && lastMsg.isStreaming) {
+              lastMsg.content = `Error: ${data.error}`;
+              lastMsg.isStreaming = false;
+            } else {
+              newMsgs.push({
+                id: Date.now(),
+                sender: 'bot',
+                type: 'text',
+                content: `Error: ${data.error}`,
+              });
+            }
+            return newMsgs;
+          }
+
+          return prevMsgs;
+        });
+      } catch (err) {
+        console.error('[Frontend] Error parsing WebSocket message:', err);
+      }
+    };
+  }, [ws]);
 
   // Send text to backend via WebSocket
   const sendTextToBackend = (text: string) => {
@@ -122,13 +152,20 @@ function App() {
   // Handle text input send
   const handleSend = () => {
     if (input.trim() === '') return;
-    const newMsg: Message = {
-      id: Date.now() + Math.random(),
+    const userMsg: Message = {
+      id: Date.now(),
       sender: 'user',
       type: 'text',
       content: input,
     };
-    setMessages((msgs) => [...msgs, newMsg]);
+    const botPlaceholder: Message = {
+      id: Date.now() + 1,
+      sender: 'bot',
+      type: 'text',
+      content: '',
+      isStreaming: true,
+    };
+    setMessages((msgs) => [...msgs, userMsg, botPlaceholder]);
     sendTextToBackend(input);
     setInput('');
   };

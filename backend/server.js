@@ -162,6 +162,97 @@ const convertToLinearPCM = (audioBuffer, mimeType) => {
   });
 };
 
+// Helper function for handling LLM stream, sentence splitting, and TTS
+const handleLlmStream = async (prompt, ws) => {
+  const promptWithLimit = `${prompt}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
+  
+  try {
+    const stream = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [{ role: "user", content: promptWithLimit }],
+      max_tokens: 300,
+      stream: true,
+    });
+
+    let llmResponse = "";
+    let sentenceBuffer = "";
+    const sentenceQueue = [];
+    let processingQueue = false;
+
+    const processSentenceQueue = async () => {
+      if (processingQueue || sentenceQueue.length === 0) {
+        return;
+      }
+      processingQueue = true;
+      const sentence = sentenceQueue.shift();
+      
+      if (!sentence) {
+        processingQueue = false;
+        processSentenceQueue();
+        return;
+      }
+
+      try {
+        console.log(`[Backend] Processing sentence for TTS: "${sentence}"`);
+        const ttsAudioMp3 = await ttsWithElevenLabs({
+          text: sentence,
+          apiKey: ELEVENLABS_API_KEY,
+        });
+        const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
+        await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
+        console.log('[Backend] Sent TTS audio for sentence to grpc_client.py');
+      } catch (err) {
+        console.error('[Backend] Error in TTS or sending audio for sentence:', err);
+      } finally {
+        processingQueue = false;
+        processSentenceQueue();
+      }
+    };
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || "";
+      if (content) {
+        llmResponse += content;
+        sentenceBuffer += content;
+        
+        ws.send(JSON.stringify({ type: 'llm_chunk', chunk: content }));
+
+        const sentenceEndRegex = /(?<!\b(Mr|Mrs|Dr|Ms|Sr|Jr)\.)([.?!]|\.\.\.)\s/g;
+        let match;
+        let lastIndex = 0;
+        while ((match = sentenceEndRegex.exec(sentenceBuffer)) !== null) {
+          const sentence = sentenceBuffer.substring(lastIndex, match.index + match[0].length).trim();
+          if (sentence) {
+            sentenceQueue.push(sentence);
+          }
+          lastIndex = sentenceEndRegex.lastIndex;
+        }
+
+        sentenceBuffer = sentenceBuffer.slice(lastIndex);
+
+        if (!processingQueue) {
+          processSentenceQueue();
+        }
+      }
+    }
+
+    const remainingSentence = sentenceBuffer.trim();
+    if (remainingSentence) {
+      sentenceQueue.push(remainingSentence);
+      if (!processingQueue) {
+        processSentenceQueue();
+      }
+    }
+
+    ws.send(JSON.stringify({ type: 'llm_response_complete', response: llmResponse }));
+    console.log('[Backend] LLM stream finished. Full response:', llmResponse);
+
+  } catch (error) {
+    console.error("[Backend] Error in handleLlmStream:", error);
+    ws.send(JSON.stringify({ type: 'error', error: `LLM stream failed: ${error.message || 'An unknown error occurred.'}` }));
+  }
+};
+
 // WebSocket for audio streaming
 wss.on('connection', (ws) => {
   console.log('Client connected via WebSocket');
@@ -190,36 +281,7 @@ wss.on('connection', (ws) => {
       // Handle text message
       if (parsed && parsed.type === 'text' && parsed.prompt) {
         console.log('[Backend] Handling text message:', parsed.prompt);
-        const promptWithLimit = `${parsed.prompt}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
-        // const completion = await openai.chat.completions.create({
-        //   model: "gpt-4",
-        //   messages: [{ role: "user", content: promptWithLimit }],
-        //   max_tokens: 300,
-        // });
-        // const llmResponse = completion.choices[0]?.message?.content || "";
-        const llmResponse = "I can help you with a wide range of tasks across many domains. Whether you're coding in Python, JavaScript, or working with machine learning models, I can write, debug, and explain code, assist with AI pipelines, and support deployment. I can also answer complex questions, simplify technical topics, and help you learn new skills—from system design and data science to creative writing and productivity workflows.";
-        setTimeout(() => {
-          ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
-        }, 2000);
-
-        // --- TTS and send to grpc_client.py ---
-        try {
-          // Generate TTS audio (MP3) from LLM response
-          const ttsAudioMp3 = await ttsWithElevenLabs({
-            text: llmResponse,
-            apiKey: ELEVENLABS_API_KEY,
-            // voiceId and modelId use defaults
-          });
-          // Convert MP3 to WAV (PCM, mono, 16kHz)
-          const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
-          // Send WAV to grpc_client.py via WebSocket
-          await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
-          console.log('[Backend] Sent TTS audio to grpc_client.py via WebSocket');
-        } catch (err) {
-          console.error('[Backend] Error in TTS or sending audio to grpc_client:', err);
-        }
-        // --- End TTS and send ---
-
+        await handleLlmStream(parsed.prompt, ws);
         return;
       }
 
@@ -263,38 +325,8 @@ wss.on('connection', (ws) => {
             // Send transcript to frontend
             ws.send(JSON.stringify({ type: 'transcript', transcript }));
 
-            // Generate LLM response
-            const promptWithLimit = `${transcript}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
-            // const completion = await openai.chat.completions.create({
-            //   model: "gpt-4",
-            //   messages: [{ role: "user", content: promptWithLimit }],
-            //   max_tokens: 300,
-            // });
-            // const llmResponse = completion.choices[0]?.message?.content || "";
-            const llmResponse = "I can help you with a wide range of tasks across many domains. Whether you're coding in Python, JavaScript, or working with machine learning models, I can write, debug, and explain code, assist with AI pipelines, and support deployment. I can also answer complex questions, simplify technical topics, and help you learn new skills—from system design and data science to creative writing and productivity workflows.";
-            
-            // Send LLM response to frontend
-            setTimeout(() => {
-              ws.send(JSON.stringify({ type: 'llm_response', response: llmResponse }));
-            }, 2000);
-
-            // --- TTS and send to grpc_client.py ---
-            try {
-              // Generate TTS audio (MP3) from LLM response
-              const ttsAudioMp3 = await ttsWithElevenLabs({
-                text: llmResponse,
-                apiKey: ELEVENLABS_API_KEY,
-                // voiceId and modelId use defaults
-              });
-              // Convert MP3 to WAV (PCM, mono, 16kHz)
-              const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
-              // Send WAV to grpc_client.py via WebSocket
-              await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
-              console.log('[Backend] Sent TTS audio to grpc_client.py via WebSocket (from audio buffer handler)');
-            } catch (err) {
-              console.error('[Backend] Error in TTS or sending audio to grpc_client (from audio buffer handler):', err);
-            }
-            // --- End TTS and send ---
+            // Generate and stream LLM response
+            await handleLlmStream(transcript, ws);
 
           } else {
             ws.send(JSON.stringify({ type: 'error', error: 'No speech detected in audio' }));
