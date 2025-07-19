@@ -258,6 +258,7 @@ wss.on('connection', (ws) => {
   console.log('Client connected via WebSocket');
 
   let lastAudioMimeType = null;
+  let lastLanguage = 'en'; // Default to English
 
   ws.on('message', async (message) => {
     try {
@@ -271,16 +272,22 @@ wss.on('connection', (ws) => {
         parsed = null;
       }
 
-      // Handle mime type message
+      // Handle mime type message (may include language)
       if (parsed && parsed.type === 'audio-mime' && parsed.mimeType) {
         lastAudioMimeType = parsed.mimeType;
-        console.log('[Backend] Received audio mimeType:', lastAudioMimeType);
+        if (parsed.language && (parsed.language === 'en' || parsed.language === 'ar')) {
+          lastLanguage = parsed.language;
+        }
+        console.log('[Backend] Received audio mimeType:', lastAudioMimeType, 'language:', lastLanguage);
         return;
       }
 
-      // Handle text message
+      // Handle text message (may include language)
       if (parsed && parsed.type === 'text' && parsed.prompt) {
-        console.log('[Backend] Handling text message:', parsed.prompt);
+        if (parsed.language && (parsed.language === 'en' || parsed.language === 'ar')) {
+          lastLanguage = parsed.language;
+        }
+        console.log('[Backend] Handling text message:', parsed.prompt, 'language:', lastLanguage);
         await handleLlmStream(parsed.prompt, ws);
         return;
       }
@@ -311,7 +318,7 @@ wss.on('connection', (ws) => {
               },
               params: {
                 model: 'whisper',
-                language: 'ar',
+                language: lastLanguage || 'en',
                 filler_words: false,
                 punctuate: true,
               }
