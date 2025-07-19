@@ -310,8 +310,8 @@ wss.on('connection', (ws) => {
                 'Content-Type': 'audio/wav',
               },
               params: {
-                model: 'nova-2',
-                language: 'en-US',
+                model: 'whisper',
+                language: 'ar',
                 filler_words: false,
                 punctuate: true,
               }

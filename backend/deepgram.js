@@ -4,7 +4,7 @@ const WebSocket = require('ws');
 function connectToDeepgram({ apiKey, sampleRate = 16000, encoding = 'linear16', onTranscript, onError }) {
   // Use Sec‑WebSocket‑Protocol for auth (Deepgram supports this method)
   const protocols = ['token', apiKey];
-  const uri = `wss://api.deepgram.com/v1/listen?punctuate=true&language=en-US&encoding=${encoding}&sample_rate=${sampleRate}`;
+  const uri = `wss://api.deepgram.com/v1/listen?model=whisper&language=ar`;
 
   const ws = new WebSocket(uri, protocols);
 
