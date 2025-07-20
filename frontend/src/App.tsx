@@ -20,6 +20,7 @@ function App() {
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
   const [wsStatusText, setWsStatusText] = useState<string>('Connecting...');
+  const [language, setLanguage] = useState<'en' | 'ar'>('en');
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // Scroll to bottom on new message
@@ -124,7 +125,7 @@ function App() {
   // Send text to backend via WebSocket
   const sendTextToBackend = (text: string) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'text', prompt: text }));
+      ws.send(JSON.stringify({ type: 'text', prompt: text, language }));
     }
   };
 
@@ -132,8 +133,8 @@ function App() {
   const sendAudioToBackend = (audioBlob: Blob) => {
     console.log('[Frontend] Sending audio to backend, size:', audioBlob.size, 'type:', audioBlob.type);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      // Send mimeType first
-      ws.send(JSON.stringify({ type: 'audio-mime', mimeType: audioBlob.type }));
+      // Send mimeType and language first
+      ws.send(JSON.stringify({ type: 'audio-mime', mimeType: audioBlob.type, language }));
       
       // Then send the audio data
       const reader = new FileReader();
@@ -346,6 +347,18 @@ function App() {
       </div>
       <div className="chat-header">
         <h2>Chat Assistant</h2>
+        <div style={{ marginTop: 8 }}>
+          <label htmlFor="lang-select" style={{ marginRight: 8 }}>Language:</label>
+          <select
+            id="lang-select"
+            value={language}
+            onChange={e => setLanguage(e.target.value as 'en' | 'ar')}
+            style={{ padding: '2px 8px', fontSize: 16 }}
+          >
+            <option value="en">English</option>
+            <option value="ar">Arabic</option>
+          </select>
+        </div>
       </div>
       <div className="chat-body">
         {messages.map((msg) => (
