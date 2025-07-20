@@ -29,6 +29,7 @@ const PORT = 8000;
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const MODE = process.env.MODE || 'audio'; // Default to 'audio'
 
 // Initialize OpenAI client
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -163,7 +164,7 @@ const convertToLinearPCM = (audioBuffer, mimeType) => {
 };
 
 // Helper function for handling LLM stream, sentence splitting, and TTS
-const handleLlmStream = async (prompt, ws) => {
+const handleLlmStream = async (prompt, ws, language = 'en') => {
   const promptWithLimit = `${prompt}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
   
   try {
@@ -180,32 +181,35 @@ const handleLlmStream = async (prompt, ws) => {
     let processingQueue = false;
 
     const processSentenceQueue = async () => {
-      if (processingQueue || sentenceQueue.length === 0) {
-        return;
-      }
+      if (processingQueue) return;
       processingQueue = true;
-      const sentence = sentenceQueue.shift();
-      
-      if (!sentence) {
-        processingQueue = false;
-        processSentenceQueue();
-        return;
-      }
-
       try {
-        console.log(`[Backend] Processing sentence for TTS: "${sentence}"`);
-        const ttsAudioMp3 = await ttsWithElevenLabs({
-          text: sentence,
-          apiKey: ELEVENLABS_API_KEY,
-        });
-        const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
-        await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
-        console.log('[Backend] Sent TTS audio for sentence to grpc_client.py');
-      } catch (err) {
-        console.error('[Backend] Error in TTS or sending audio for sentence:', err);
+        while (sentenceQueue.length > 0) {
+          const sentence = sentenceQueue.shift();
+          if (!sentence) continue;
+          try {
+            console.log(`[Backend] Processing sentence for TTS: "${sentence}"`);
+            const ttsAudioMp3 = await ttsWithElevenLabs({
+              text: sentence,
+              apiKey: ELEVENLABS_API_KEY,
+              language: language,
+            });
+
+            if (MODE === 'audio-with-avatar') {
+              const wavBuffer = await convertMp3ToWavPcm16kMono(ttsAudioMp3);
+              await sendWavToGrpcClient(wavBuffer, 16000, "ws://localhost:8765");
+              console.log('[Backend] Sent TTS audio for sentence to grpc_client.py');
+            } else {
+              // In 'audio' mode, send the MP3 directly to the frontend
+              ws.send(JSON.stringify({ type: 'audio_chunk', chunk: ttsAudioMp3.toString('base64') }));
+              console.log('[Backend] Sent TTS audio chunk to frontend');
+            }
+          } catch (err) {
+            console.error('[Backend] Error in TTS or sending audio for sentence:', err);
+          }
+        }
       } finally {
         processingQueue = false;
-        processSentenceQueue();
       }
     };
 
@@ -215,8 +219,9 @@ const handleLlmStream = async (prompt, ws) => {
         llmResponse += content;
         sentenceBuffer += content;
         
-        ws.send(JSON.stringify({ type: 'llm_chunk', chunk: content }));
+        ws.send(JSON.stringify({ type: 'llm_chunk', chunk: llmResponse }));
 
+        // Only extract and queue complete sentences during streaming
         const sentenceEndRegex = /(?<!\b(Mr|Mrs|Dr|Ms|Sr|Jr)\.)([.?!]|\.\.\.)\s/g;
         let match;
         let lastIndex = 0;
@@ -227,21 +232,19 @@ const handleLlmStream = async (prompt, ws) => {
           }
           lastIndex = sentenceEndRegex.lastIndex;
         }
-
+        // Only keep the incomplete part in the buffer
         sentenceBuffer = sentenceBuffer.slice(lastIndex);
-
-        if (!processingQueue) {
-          processSentenceQueue();
-        }
       }
     }
 
+    // After streaming, process any remaining sentence in the buffer
     const remainingSentence = sentenceBuffer.trim();
     if (remainingSentence) {
       sentenceQueue.push(remainingSentence);
-      if (!processingQueue) {
-        processSentenceQueue();
-      }
+    }
+    // Start processing the queue once, after all sentences are queued
+    if (!processingQueue) {
+      processSentenceQueue();
     }
 
     ws.send(JSON.stringify({ type: 'llm_response_complete', response: llmResponse }));
@@ -288,7 +291,7 @@ wss.on('connection', (ws) => {
           lastLanguage = parsed.language;
         }
         console.log('[Backend] Handling text message:', parsed.prompt, 'language:', lastLanguage);
-        await handleLlmStream(parsed.prompt, ws);
+        await handleLlmStream(parsed.prompt, ws, lastLanguage);
         return;
       }
 
@@ -333,7 +336,7 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'transcript', transcript }));
 
             // Generate and stream LLM response
-            await handleLlmStream(transcript, ws);
+            await handleLlmStream(transcript, ws, lastLanguage);
 
           } else {
             ws.send(JSON.stringify({ type: 'error', error: 'No speech detected in audio' }));

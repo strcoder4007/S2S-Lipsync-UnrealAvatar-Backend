@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.env
+venv
+__pycache__
+*.pyc
+.DS_Store
+.git
+.gitignore
+audio2face/venv
+audio2face/__pycache__
+audio2face/*.pyc

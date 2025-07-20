@@ -21,7 +21,11 @@ function App() {
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
   const [wsStatusText, setWsStatusText] = useState<string>('Connecting...');
   const [language, setLanguage] = useState<'en' | 'ar'>('en');
+  const [audioQueue, setAudioQueue] = useState<Blob[]>([]);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const lastAudioUrlRef = useRef<string | null>(null);
 
   // Scroll to bottom on new message
   useEffect(() => {
@@ -68,7 +72,7 @@ function App() {
 
           if (data.type === 'llm_chunk') {
             if (lastMsg && lastMsg.sender === 'bot' && lastMsg.isStreaming) {
-              lastMsg.content += data.chunk;
+              lastMsg.content = data.chunk;
             }
             return newMsgs;
           }
@@ -114,6 +118,18 @@ function App() {
             return newMsgs;
           }
 
+          if (data.type === 'audio_chunk') {
+            const byteCharacters = atob(data.chunk);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const audioBlob = new Blob([byteArray], { type: 'audio/mpeg' });
+            setAudioQueue(prevQueue => [...prevQueue, audioBlob]);
+            return prevMsgs;
+          }
+
           return prevMsgs;
         });
       } catch (err) {
@@ -121,6 +137,31 @@ function App() {
       }
     };
   }, [ws]);
+
+  // Play audio from the queue
+  useEffect(() => {
+    if (
+      audioQueue.length > 0 &&
+      audioPlayerRef.current &&
+      audioPlayerRef.current.paused
+    ) {
+      const audioBlob = audioQueue[0];
+      const audioUrl = URL.createObjectURL(audioBlob);
+      // Only set and play if the URL is different
+      if (lastAudioUrlRef.current !== audioUrl) {
+        // Revoke previous URL to avoid memory leaks
+        if (lastAudioUrlRef.current) {
+          URL.revokeObjectURL(lastAudioUrlRef.current);
+        }
+        lastAudioUrlRef.current = audioUrl;
+        audioPlayerRef.current.src = audioUrl;
+        audioPlayerRef.current.play().catch(e => {
+          console.error("Error playing audio:", e);
+          setAudioQueue(prevQueue => prevQueue.slice(1));
+        });
+      }
+    }
+  }, [audioQueue]);
 
   // Send text to backend via WebSocket
   const sendTextToBackend = (text: string) => {
@@ -331,6 +372,20 @@ function App() {
 
   return (
     <div className="chat-app">
+      <audio
+        ref={audioPlayerRef}
+        playsInline
+        onEnded={() => {
+        if (audioPlayerRef.current) {
+          audioPlayerRef.current.src = '';
+        }
+        if (lastAudioUrlRef.current) {
+          URL.revokeObjectURL(lastAudioUrlRef.current);
+          lastAudioUrlRef.current = null;
+        }
+        setAudioQueue(prevQueue => prevQueue.slice(1));
+        }}
+      />
       <div className="ws-status-bar">
         <span
           className="ws-status-indicator"

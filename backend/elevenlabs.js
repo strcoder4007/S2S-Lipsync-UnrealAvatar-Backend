@@ -2,7 +2,15 @@
 
 const axios = require('axios');
 
-async function ttsWithElevenLabs({ text, apiKey, voiceId = "56AoDkrOh6qfVPDXZ7Pt", modelId = "eleven_flash_v2_5" }) {
+async function ttsWithElevenLabs({ text, apiKey, language = 'en', modelId = "eleven_flash_v2_5" }) {
+  const voiceId = language === 'ar' 
+    ? process.env.ELEVENLABS_VOICE_ID_AR_F 
+    : process.env.ELEVENLABS_VOICE_ID;
+
+  if (!voiceId) {
+    throw new Error(`Voice ID for language '${language}' is not configured in .env. Make sure ELEVENLABS_VOICE_ID and ELEVENLABS_VOICE_ID_AR_F are set.`);
+  }
+
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`;
   try {
     const response = await axios({
