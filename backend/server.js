@@ -165,11 +165,11 @@ const convertToLinearPCM = (audioBuffer, mimeType) => {
 
 // Helper function for handling LLM stream, sentence splitting, and TTS
 const handleLlmStream = async (prompt, ws, language = 'en') => {
-  const promptWithLimit = `Please answer in no more than 2/3 sentences and 150 words and in the same language the following query is. Query: ${prompt}\n\n`;
+  const promptWithLimit = `Please answer in small sentences and in total the response should be under 100 words and in the same language the following query is. Query: ${prompt}\n\n`;
   
   try {
     const stream = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4.1-nano",
       messages: [{ role: "user", content: promptWithLimit }],
       max_tokens: 300,
       stream: true,
@@ -234,6 +234,11 @@ const handleLlmStream = async (prompt, ws, language = 'en') => {
         }
         // Only keep the incomplete part in the buffer
         sentenceBuffer = sentenceBuffer.slice(lastIndex);
+
+        // Start processing the queue if it's not already running
+        if (!processingQueue) {
+          processSentenceQueue();
+        }
       }
     }
 
@@ -242,7 +247,7 @@ const handleLlmStream = async (prompt, ws, language = 'en') => {
     if (remainingSentence) {
       sentenceQueue.push(remainingSentence);
     }
-    // Start processing the queue once, after all sentences are queued
+    // Ensure any remaining sentences are processed
     if (!processingQueue) {
       processSentenceQueue();
     }
