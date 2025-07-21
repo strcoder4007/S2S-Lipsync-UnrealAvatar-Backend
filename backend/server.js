@@ -165,7 +165,7 @@ const convertToLinearPCM = (audioBuffer, mimeType) => {
 
 // Helper function for handling LLM stream, sentence splitting, and TTS
 const handleLlmStream = async (prompt, ws, language = 'en') => {
-  const promptWithLimit = `${prompt}\n\nPlease answer in no more than 2/3 sentences and 150 words.`;
+  const promptWithLimit = `Please answer in no more than 2/3 sentences and 150 words and in the same language the following query is. Query: ${prompt}\n\n`;
   
   try {
     const stream = await openai.chat.completions.create({
