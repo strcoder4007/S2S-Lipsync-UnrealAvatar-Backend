@@ -66,6 +66,18 @@ function App() {
       try {
         const data = JSON.parse(event.data);
 
+        if (data.type === 'audio_chunk') {
+          const byteCharacters = atob(data.chunk);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const audioBlob = new Blob([byteArray], { type: 'audio/mpeg' });
+          setAudioQueue(prevQueue => [...prevQueue, audioBlob]);
+          return;
+        }
+
         setMessages(prevMsgs => {
           const newMsgs = [...prevMsgs];
           const lastMsg = newMsgs[newMsgs.length - 1];
@@ -116,18 +128,6 @@ function App() {
               });
             }
             return newMsgs;
-          }
-
-          if (data.type === 'audio_chunk') {
-            const byteCharacters = atob(data.chunk);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const audioBlob = new Blob([byteArray], { type: 'audio/mpeg' });
-            setAudioQueue(prevQueue => [...prevQueue, audioBlob]);
-            return prevMsgs;
           }
 
           return prevMsgs;
